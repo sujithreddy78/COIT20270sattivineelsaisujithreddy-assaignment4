@@ -1,1 +1,3337 @@
+import 'dart:convert';
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+void main() {
+  runApp(const HmsToolLibraryApp());
+}
+
+class HmsToolLibraryApp extends StatelessWidget {
+  const HmsToolLibraryApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      restorationScopeId: 'hms-tool-library-a4-v3',
+      title: 'HMS Tool Library',
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF2E6B4F),
+          brightness: Brightness.light,
+        ),
+        textTheme: const TextTheme(
+          headlineMedium: TextStyle(
+            fontSize: 30,
+            fontWeight: FontWeight.w700,
+          ),
+          titleLarge: TextStyle(
+            fontSize: 23,
+            fontWeight: FontWeight.w700,
+          ),
+          titleMedium: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+          bodyLarge: TextStyle(fontSize: 17, height: 1.35),
+          bodyMedium: TextStyle(fontSize: 15, height: 1.35),
+        ),
+        inputDecorationTheme: const InputDecorationTheme(
+          border: OutlineInputBorder(),
+          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        ),
+        filledButtonTheme: const FilledButtonThemeData(
+          style: ButtonStyle(
+            minimumSize: WidgetStatePropertyAll(Size(88, 48)),
+          ),
+        ),
+        outlinedButtonTheme: const OutlinedButtonThemeData(
+          style: ButtonStyle(
+            minimumSize: WidgetStatePropertyAll(Size(88, 48)),
+          ),
+        ),
+        snackBarTheme: const SnackBarThemeData(
+          behavior: SnackBarBehavior.floating,
+        ),
+      ),
+      home: const HmsAppShell(),
+    );
+  }
+}
+
+enum AppRoute {
+  home,
+  toolLibrary,
+  toolDetails,
+  borrowRequest,
+  requestStatus,
+  coordinatorApproval,
+  approvedCollection,
+  borrowedTools,
+  returnTool,
+  returnRecord,
+}
+
+enum ToolAvailability { available, onLoan, maintenance }
+
+enum BorrowRequestStatus {
+  pending,
+  approved,
+  rejected,
+  collected,
+  returned,
+}
+
+enum ReturnCondition {
+  good,
+  minorDamage,
+  damaged,
+  requiresMaintenance,
+}
+
+class ToolItem {
+  ToolItem({
+    required this.name,
+    required this.category,
+    required this.description,
+    required this.safetyInformation,
+    required this.icon,
+    required this.availability,
+    required this.condition,
+  });
+
+  final String name;
+  final String category;
+  final String description;
+  final String safetyInformation;
+  final IconData icon;
+  ToolAvailability availability;
+  String condition;
+}
+
+class BorrowRequestRecord {
+  BorrowRequestRecord({
+    required this.memberName,
+    required this.tool,
+    required this.requestedOn,
+    required this.dueOn,
+    required this.status,
+  });
+
+  final String memberName;
+  final ToolItem tool;
+  final DateTime requestedOn;
+  final DateTime dueOn;
+  BorrowRequestStatus status;
+}
+
+class BorrowedToolRecord {
+  BorrowedToolRecord({
+    required this.memberName,
+    required this.tool,
+    required this.borrowedOn,
+    required this.dueOn,
+  });
+
+  final String memberName;
+  final ToolItem tool;
+  final DateTime borrowedOn;
+  final DateTime dueOn;
+  bool returned = false;
+  DateTime? returnedOn;
+  ReturnCondition? returnedCondition;
+  String returnNotes = '';
+}
+
+class MemberRecord {
+  const MemberRecord({
+    required this.id,
+    required this.name,
+    required this.role,
+  });
+
+  final String id;
+  final String name;
+  final String role;
+}
+
+class HmsRepository {
+  HmsRepository() {
+    _member = const MemberRecord(
+      id: 'HMS-001',
+      name: 'James Smith',
+      role: 'HMS member',
+    );
+    _tools.addAll(_buildSeedTools());
+  }
+
+  late MemberRecord _member;
+  final List<ToolItem> _tools = [];
+  final List<BorrowedToolRecord> _borrowedRecords = [];
+  BorrowRequestRecord? _activeRequest;
+  BorrowedToolRecord? _lastReturnedRecord;
+
+  MemberRecord get member => _member;
+  List<ToolItem> get tools => List.unmodifiable(_tools);
+  List<BorrowedToolRecord> get borrowedRecords =>
+      List.unmodifiable(_borrowedRecords);
+  BorrowRequestRecord? get activeRequest => _activeRequest;
+  BorrowedToolRecord? get lastReturnedRecord => _lastReturnedRecord;
+
+  // The repository acts as the simulated backend boundary. Only initial seed
+  // data is hardcoded; requests, loans, returns and inventory changes are
+  // created and updated through repository operations.
+  List<ToolItem> _buildSeedTools() {
+    return [
+      ToolItem(
+        name: 'Compound mitre saw',
+        category: 'Power Tools',
+        description:
+            'A bench-mounted saw for accurate cross-cuts and angled timber cuts.',
+        safetyInformation:
+            'Wear eye and hearing protection. Keep hands outside the marked cutting zone.',
+        icon: Icons.carpenter,
+        availability: ToolAvailability.available,
+        condition: 'Good - inspected',
+      ),
+      ToolItem(
+        name: 'Pedestal drill',
+        category: 'Mechanical',
+        description:
+            'A fixed drill press for controlled and repeatable drilling operations.',
+        safetyInformation:
+            'Secure the workpiece, remove the chuck key and tie back loose clothing.',
+        icon: Icons.precision_manufacturing,
+        availability: ToolAvailability.available,
+        condition: 'Good - inspected',
+      ),
+      ToolItem(
+        name: 'Bandsaw',
+        category: 'Woodworking',
+        description:
+            'A workshop bandsaw for straight and curved cuts in suitable materials.',
+        safetyInformation:
+            'Complete the relevant induction and keep the blade guard close to the workpiece.',
+        icon: Icons.handyman,
+        availability: ToolAvailability.maintenance,
+        condition: 'Blade inspection required',
+      ),
+      ToolItem(
+        name: 'Cordless drill/driver',
+        category: 'Power Tools',
+        description:
+            'A portable drill and driver for workshop assembly and repair tasks.',
+        safetyInformation:
+            'Select the correct bit and torque setting. Remove the battery before changing bits.',
+        icon: Icons.construction,
+        availability: ToolAvailability.available,
+        condition: 'Good',
+      ),
+      ToolItem(
+        name: 'No. 4 hand plane',
+        category: 'Hand Tools',
+        description:
+            'A smoothing plane for preparing timber surfaces and refining edges.',
+        safetyInformation:
+            'Retract or cover the blade when stored and keep fingers clear of the cutting edge.',
+        icon: Icons.hardware,
+        availability: ToolAvailability.available,
+        condition: 'Good',
+      ),
+      ToolItem(
+        name: 'Orbital sander',
+        category: 'Carpentry',
+        description:
+            'A random-orbit sander for preparing timber before finishing.',
+        safetyInformation:
+            'Use dust extraction and respiratory protection appropriate to the material.',
+        icon: Icons.home_repair_service,
+        availability: ToolAvailability.available,
+        condition: 'Good',
+      ),
+      ToolItem(
+        name: 'Metal bench vice',
+        category: 'Metalworking',
+        description:
+            'A heavy bench vice for safely holding suitable metal components.',
+        safetyInformation:
+            'Secure work fully and do not extend the handle with improvised leverage.',
+        icon: Icons.build,
+        availability: ToolAvailability.available,
+        condition: 'Good',
+      ),
+    ];
+  }
+
+  ToolItem? _toolByName(String? name) {
+    if (name == null) return null;
+    for (final tool in _tools) {
+      if (tool.name == name) return tool;
+    }
+    return null;
+  }
+
+  BorrowRequestRecord? createBorrowRequest({
+    required ToolItem tool,
+    required DateTime requestedOn,
+    required DateTime dueOn,
+  }) {
+    if (!_tools.contains(tool) ||
+        tool.availability != ToolAvailability.available ||
+        (_activeRequest?.status == BorrowRequestStatus.pending)) {
+      return null;
+    }
+
+    _activeRequest = BorrowRequestRecord(
+      memberName: _member.name,
+      tool: tool,
+      requestedOn: requestedOn,
+      dueOn: dueOn,
+      status: BorrowRequestStatus.pending,
+    );
+    return _activeRequest;
+  }
+
+  bool canDecideRequest({required bool approve}) {
+    final request = _activeRequest;
+    if (request == null || request.status != BorrowRequestStatus.pending) {
+      return false;
+    }
+    if (approve && request.tool.availability != ToolAvailability.available) {
+      return false;
+    }
+    return true;
+  }
+
+  bool updateRequestDecision({required bool approve}) {
+    if (!canDecideRequest(approve: approve)) return false;
+    _activeRequest!.status =
+        approve ? BorrowRequestStatus.approved : BorrowRequestStatus.rejected;
+    return true;
+  }
+
+  BorrowedToolRecord? confirmCollection({required DateTime collectedOn}) {
+    final request = _activeRequest;
+    if (request == null ||
+        request.status != BorrowRequestStatus.approved ||
+        request.tool.availability != ToolAvailability.available) {
+      return null;
+    }
+
+    for (final record in _borrowedRecords) {
+      if (record.tool == request.tool && !record.returned) {
+        return record;
+      }
+    }
+
+    request.status = BorrowRequestStatus.collected;
+    request.tool.availability = ToolAvailability.onLoan;
+
+    final record = BorrowedToolRecord(
+      memberName: request.memberName,
+      tool: request.tool,
+      borrowedOn: collectedOn,
+      dueOn: request.dueOn,
+    );
+    _borrowedRecords.add(record);
+    return record;
+  }
+
+  BorrowedToolRecord? completeReturn({
+    required BorrowedToolRecord record,
+    required ReturnCondition condition,
+    required String notes,
+    required DateTime returnedOn,
+  }) {
+    if (!_borrowedRecords.contains(record) || record.returned) return null;
+
+    final requiresInspection = condition != ReturnCondition.good;
+    record.returned = true;
+    record.returnedOn = returnedOn;
+    record.returnedCondition = condition;
+    record.returnNotes = notes.trim();
+    record.tool.condition = returnConditionLabel(condition);
+    record.tool.availability = requiresInspection
+        ? ToolAvailability.maintenance
+        : ToolAvailability.available;
+
+    if (_activeRequest?.tool == record.tool) {
+      _activeRequest!.status = BorrowRequestStatus.returned;
+    }
+    _lastReturnedRecord = record;
+    return record;
+  }
+
+  Map<String, dynamic> exportState() {
+    String? date(DateTime? value) => value?.toIso8601String();
+    return {
+      'member': {
+        'id': _member.id,
+        'name': _member.name,
+        'role': _member.role,
+      },
+      'tools': _tools
+          .map((tool) => {
+                'name': tool.name,
+                'availability': tool.availability.index,
+                'condition': tool.condition,
+              })
+          .toList(),
+      'request': _activeRequest == null
+          ? null
+          : {
+              'member': _activeRequest!.memberName,
+              'tool': _activeRequest!.tool.name,
+              'requestedOn': date(_activeRequest!.requestedOn),
+              'dueOn': date(_activeRequest!.dueOn),
+              'status': _activeRequest!.status.index,
+            },
+      'loans': _borrowedRecords
+          .map((record) => {
+                'member': record.memberName,
+                'tool': record.tool.name,
+                'borrowedOn': date(record.borrowedOn),
+                'dueOn': date(record.dueOn),
+                'returned': record.returned,
+                'returnedOn': date(record.returnedOn),
+                'returnedCondition': record.returnedCondition?.index,
+                'notes': record.returnNotes,
+              })
+          .toList(),
+      'lastReturnedTool': _lastReturnedRecord?.tool.name,
+    };
+  }
+
+  void restoreState(Map<String, dynamic> data) {
+    final memberData = data['member'];
+    if (memberData is Map<String, dynamic>) {
+      _member = MemberRecord(
+        id: memberData['id'] as String? ?? _member.id,
+        name: memberData['name'] as String? ?? _member.name,
+        role: memberData['role'] as String? ?? _member.role,
+      );
+    }
+
+    final toolStates = data['tools'] as List<dynamic>? ?? const [];
+    for (final entry in toolStates) {
+      if (entry is! Map<String, dynamic>) continue;
+      final tool = _toolByName(entry['name'] as String?);
+      if (tool == null) continue;
+      final availability = entry['availability'] as int?;
+      if (availability != null &&
+          availability >= 0 &&
+          availability < ToolAvailability.values.length) {
+        tool.availability = ToolAvailability.values[availability];
+      }
+      tool.condition = entry['condition'] as String? ?? tool.condition;
+    }
+
+    _borrowedRecords.clear();
+    final loanData = data['loans'] as List<dynamic>? ?? const [];
+    for (final entry in loanData) {
+      if (entry is! Map<String, dynamic>) continue;
+      final tool = _toolByName(entry['tool'] as String?);
+      final borrowedOn = entry['borrowedOn'] as String?;
+      final dueOn = entry['dueOn'] as String?;
+      if (tool == null || borrowedOn == null || dueOn == null) continue;
+
+      final record = BorrowedToolRecord(
+        memberName: entry['member'] as String? ?? _member.name,
+        tool: tool,
+        borrowedOn: DateTime.parse(borrowedOn),
+        dueOn: DateTime.parse(dueOn),
+      );
+      record.returned = entry['returned'] as bool? ?? false;
+      final returnedOn = entry['returnedOn'] as String?;
+      if (returnedOn != null) record.returnedOn = DateTime.parse(returnedOn);
+      final conditionIndex = entry['returnedCondition'] as int?;
+      if (conditionIndex != null &&
+          conditionIndex >= 0 &&
+          conditionIndex < ReturnCondition.values.length) {
+        record.returnedCondition = ReturnCondition.values[conditionIndex];
+      }
+      record.returnNotes = entry['notes'] as String? ?? '';
+      _borrowedRecords.add(record);
+    }
+
+    final requestData = data['request'];
+    if (requestData is Map<String, dynamic>) {
+      final tool = _toolByName(requestData['tool'] as String?);
+      final requestedOn = requestData['requestedOn'] as String?;
+      final dueOn = requestData['dueOn'] as String?;
+      final statusIndex = requestData['status'] as int?;
+      if (tool != null &&
+          requestedOn != null &&
+          dueOn != null &&
+          statusIndex != null &&
+          statusIndex >= 0 &&
+          statusIndex < BorrowRequestStatus.values.length) {
+        _activeRequest = BorrowRequestRecord(
+          memberName: requestData['member'] as String? ?? _member.name,
+          tool: tool,
+          requestedOn: DateTime.parse(requestedOn),
+          dueOn: DateTime.parse(dueOn),
+          status: BorrowRequestStatus.values[statusIndex],
+        );
+      } else {
+        _activeRequest = null;
+      }
+    } else {
+      _activeRequest = null;
+    }
+
+    _lastReturnedRecord = null;
+    final lastReturnedTool = data['lastReturnedTool'] as String?;
+    if (lastReturnedTool != null) {
+      for (final record in _borrowedRecords.reversed) {
+        if (record.tool.name == lastReturnedTool && record.returned) {
+          _lastReturnedRecord = record;
+          break;
+        }
+      }
+    }
+  }
+}
+
+class HmsAppController extends ChangeNotifier {
+  HmsAppController({HmsRepository? repository})
+      : repository = repository ?? HmsRepository() {
+    selectedTool = tools.first;
+    final activeLoans = borrowedRecords.where((record) => !record.returned);
+    if (activeLoans.isNotEmpty) {
+      selectedBorrowedRecord = activeLoans.first;
+    }
+  }
+
+  final HmsRepository repository;
+  final List<AppRoute> _routeHistory = [AppRoute.home];
+
+  MemberRecord get member => repository.member;
+  String get memberName => member.name;
+  List<ToolItem> get tools => repository.tools;
+  List<BorrowedToolRecord> get borrowedRecords => repository.borrowedRecords;
+  BorrowRequestRecord? get activeRequest => repository.activeRequest;
+  BorrowedToolRecord? get lastReturnedRecord => repository.lastReturnedRecord;
+
+  AppRoute currentRoute = AppRoute.home;
+  ToolItem? selectedTool;
+  DateTime? selectedReturnDate;
+  String? returnDateError;
+  BorrowedToolRecord? selectedBorrowedRecord;
+  ReturnCondition? selectedReturnCondition;
+  String returnNotes = '';
+
+  int get selectedDestination => destinationForRoute(currentRoute);
+
+  bool get isTopLevelRoute =>
+      currentRoute == AppRoute.home ||
+      currentRoute == AppRoute.toolLibrary ||
+      currentRoute == AppRoute.borrowedTools ||
+      currentRoute == AppRoute.coordinatorApproval;
+
+  String get screenTitle {
+    switch (currentRoute) {
+      case AppRoute.home:
+        return 'HMS Tool Library';
+      case AppRoute.toolLibrary:
+        return 'Tool Library';
+      case AppRoute.toolDetails:
+        return 'Tool Details';
+      case AppRoute.borrowRequest:
+        return 'Borrow Request';
+      case AppRoute.requestStatus:
+        return 'Request Status';
+      case AppRoute.coordinatorApproval:
+        return 'Coordinator Approval';
+      case AppRoute.approvedCollection:
+        return 'Approved Collection';
+      case AppRoute.borrowedTools:
+        return 'My Borrowed Tools';
+      case AppRoute.returnTool:
+        return 'Return Tool';
+      case AppRoute.returnRecord:
+        return 'Return Record';
+    }
+  }
+
+  void selectDestination(int index) {
+    final route = switch (index) {
+      0 => AppRoute.home,
+      1 => AppRoute.toolLibrary,
+      2 => AppRoute.borrowedTools,
+      _ => AppRoute.coordinatorApproval,
+    };
+    goTo(route);
+  }
+
+  void goTo(AppRoute route, {bool addToHistory = true}) {
+    if (route == currentRoute) return;
+    if (route == AppRoute.toolDetails && selectedTool == null) {
+      selectedTool = tools.first;
+    }
+    if (route == AppRoute.returnTool && selectedBorrowedRecord == null) {
+      final activeLoans = borrowedRecords.where((record) => !record.returned);
+      if (activeLoans.isNotEmpty) selectedBorrowedRecord = activeLoans.first;
+    }
+    if (addToHistory) {
+      if (_routeHistory.isEmpty || _routeHistory.last != currentRoute) {
+        _routeHistory.add(currentRoute);
+      }
+    }
+    currentRoute = route;
+    notifyListeners();
+  }
+
+  void goBack() {
+    if (_routeHistory.isNotEmpty) {
+      final previous = _routeHistory.removeLast();
+      currentRoute = previous;
+      notifyListeners();
+      return;
+    }
+    if (currentRoute != AppRoute.home) {
+      currentRoute = AppRoute.home;
+      notifyListeners();
+    }
+  }
+
+  int destinationForRoute(AppRoute route) {
+    switch (route) {
+      case AppRoute.home:
+        return 0;
+      case AppRoute.toolLibrary:
+      case AppRoute.toolDetails:
+      case AppRoute.borrowRequest:
+      case AppRoute.requestStatus:
+        return 1;
+      case AppRoute.borrowedTools:
+      case AppRoute.returnTool:
+      case AppRoute.returnRecord:
+        return 2;
+      case AppRoute.coordinatorApproval:
+      case AppRoute.approvedCollection:
+        return 3;
+    }
+  }
+
+  void selectTool(ToolItem tool) {
+    selectedTool = tool;
+    goTo(AppRoute.toolDetails);
+  }
+
+  void prepareBorrowRequest() {
+    selectedReturnDate = null;
+    returnDateError = null;
+    goTo(AppRoute.borrowRequest);
+  }
+
+  void setReturnDate(DateTime date) {
+    selectedReturnDate = DateUtils.dateOnly(date);
+    returnDateError = null;
+    notifyListeners();
+  }
+
+  bool submitBorrowRequest() {
+    final tool = selectedTool;
+    final date = selectedReturnDate;
+    final today = DateUtils.dateOnly(DateTime.now());
+
+    if (tool == null) {
+      returnDateError = 'Select an available tool before continuing.';
+      notifyListeners();
+      return false;
+    }
+    if (date == null) {
+      returnDateError = 'Select an expected return date.';
+      notifyListeners();
+      return false;
+    }
+    if (!date.isAfter(today)) {
+      returnDateError = 'The return date must be after today.';
+      notifyListeners();
+      return false;
+    }
+    if (tool.availability != ToolAvailability.available) {
+      returnDateError = 'This tool is no longer available to request.';
+      notifyListeners();
+      return false;
+    }
+    if (activeRequest?.status == BorrowRequestStatus.pending) {
+      returnDateError = 'Finish the current pending request before creating another.';
+      notifyListeners();
+      return false;
+    }
+
+    final created = repository.createBorrowRequest(
+      tool: tool,
+      requestedOn: today,
+      dueOn: date,
+    );
+    if (created == null) {
+      returnDateError = 'The request could not be created in its current state.';
+      notifyListeners();
+      return false;
+    }
+
+    returnDateError = null;
+    goTo(AppRoute.requestStatus);
+    return true;
+  }
+
+  bool canDecideRequest(bool approve) {
+    return repository.canDecideRequest(approve: approve);
+  }
+
+  void decideRequest(bool approve) {
+    if (!repository.updateRequestDecision(approve: approve)) return;
+    goTo(approve ? AppRoute.approvedCollection : AppRoute.requestStatus);
+  }
+
+  bool confirmCollection() {
+    final record = repository.confirmCollection(
+      collectedOn: DateUtils.dateOnly(DateTime.now()),
+    );
+    if (record == null) return false;
+    selectedBorrowedRecord = record;
+    goTo(AppRoute.borrowedTools);
+    return true;
+  }
+
+  void startReturn(BorrowedToolRecord record) {
+    selectedBorrowedRecord = record;
+    selectedReturnCondition = null;
+    returnNotes = '';
+    goTo(AppRoute.returnTool);
+  }
+
+  void setReturnCondition(ReturnCondition condition) {
+    selectedReturnCondition = condition;
+    notifyListeners();
+  }
+
+  void setReturnNotes(String notes) {
+    returnNotes = notes;
+    notifyListeners();
+  }
+
+  bool completeReturn() {
+    final record = selectedBorrowedRecord;
+    final condition = selectedReturnCondition;
+    if (record == null || record.returned || condition == null) return false;
+
+    final updated = repository.completeReturn(
+      record: record,
+      condition: condition,
+      notes: returnNotes,
+      returnedOn: DateUtils.dateOnly(DateTime.now()),
+    );
+    if (updated == null) return false;
+
+    goTo(AppRoute.returnRecord);
+    return true;
+  }
+
+  String createSnapshot() {
+    String? date(DateTime? value) => value?.toIso8601String();
+    return jsonEncode({
+      'route': currentRoute.index,
+      'selectedTool': selectedTool?.name,
+      'selectedReturnDate': date(selectedReturnDate),
+      'selectedBorrowedTool': selectedBorrowedRecord?.tool.name,
+      'selectedReturnCondition': selectedReturnCondition?.index,
+      'returnNotes': returnNotes,
+      'backend': repository.exportState(),
+    });
+  }
+
+  void restoreSnapshot(String raw) {
+    if (raw.trim().isEmpty) return;
+    try {
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      final backendData = data['backend'];
+      if (backendData is Map<String, dynamic>) {
+        repository.restoreState(backendData);
+      } else {
+        // Backward-compatible fallback for snapshots created by the previous
+        // version, where backend fields were stored at the root level.
+        repository.restoreState(data);
+      }
+
+      final routeIndex = data['route'] as int?;
+      if (routeIndex != null &&
+          routeIndex >= 0 &&
+          routeIndex < AppRoute.values.length) {
+        currentRoute = AppRoute.values[routeIndex];
+      }
+
+      final selectedToolName = data['selectedTool'] as String?;
+      selectedTool = tools
+              .where((item) => item.name == selectedToolName)
+              .firstOrNull ??
+          tools.first;
+
+      final returnDate = data['selectedReturnDate'] as String?;
+      selectedReturnDate =
+          returnDate == null ? null : DateTime.parse(returnDate);
+
+      final selectedBorrowedToolName = data['selectedBorrowedTool'] as String?;
+      selectedBorrowedRecord = borrowedRecords
+          .where((record) => record.tool.name == selectedBorrowedToolName)
+          .firstOrNull;
+
+      final conditionIndex = data['selectedReturnCondition'] as int?;
+      selectedReturnCondition = conditionIndex != null &&
+              conditionIndex >= 0 &&
+              conditionIndex < ReturnCondition.values.length
+          ? ReturnCondition.values[conditionIndex]
+          : null;
+      returnNotes = data['returnNotes'] as String? ?? '';
+      notifyListeners();
+    } catch (_) {
+      // Corrupt or incompatible restoration data is ignored; repository seed
+      // data remains available so the application can still start safely.
+    }
+  }
+}
+
+extension FirstOrNullExtension<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
+}
+
+class HmsAppShell extends StatefulWidget {
+  const HmsAppShell({super.key});
+
+  @override
+  State<HmsAppShell> createState() => _HmsAppShellState();
+}
+
+class _HmsAppShellState extends State<HmsAppShell> with RestorationMixin {
+  final HmsAppController _appState = HmsAppController();
+  final RestorableString _persistedSnapshot = RestorableString('');
+
+  @override
+  String? get restorationId => 'hms-app-state-a4-v3';
+
+  @override
+  void initState() {
+    super.initState();
+    _appState.addListener(_handleStateChange);
+  }
+
+  @override
+  void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
+    registerForRestoration(_persistedSnapshot, 'workflow_snapshot_a4_v3');
+    if (_persistedSnapshot.value.isNotEmpty) {
+      _appState.restoreSnapshot(_persistedSnapshot.value);
+    }
+  }
+
+  void _handleStateChange() {
+    if (mounted) {
+      setState(() {});
+      _persistedSnapshot.value = _appState.createSnapshot();
+    }
+  }
+
+  @override
+  void dispose() {
+    _appState.removeListener(_handleStateChange);
+    _appState.dispose();
+    _persistedSnapshot.dispose();
+    super.dispose();
+  }
+
+  void _showFeedback(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _chooseReturnDate() async {
+    final today = DateUtils.dateOnly(DateTime.now());
+    final selectedDate = await showDatePicker(
+      context: context,
+      initialDate: _appState.selectedReturnDate ?? today.add(const Duration(days: 7)),
+      firstDate: today.add(const Duration(days: 1)),
+      lastDate: today.add(const Duration(days: 90)),
+      helpText: 'Select expected return date',
+    );
+    if (!mounted || selectedDate == null) return;
+    _appState.setReturnDate(selectedDate);
+  }
+
+  void _submitBorrowRequest() {
+    if (_appState.submitBorrowRequest()) {
+      _showFeedback('Borrowing request submitted for coordinator review.');
+    }
+  }
+
+  Future<void> _confirmRequestDecision(bool approve) async {
+    final request = _appState.activeRequest;
+    if (request == null || !_appState.canDecideRequest(approve)) {
+      _showFeedback(
+        approve
+            ? 'The request cannot be approved in its current state.'
+            : 'There is no pending request to reject.',
+      );
+      return;
+    }
+    final action = approve ? 'Approve' : 'Reject';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        icon: Icon(approve ? Icons.task_alt : Icons.cancel_outlined),
+        title: Text('$action borrowing request?'),
+        content: Text(
+          '$action ${request.memberName}\'s request for ${request.tool.name}?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(action),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    _appState.decideRequest(approve);
+    _showFeedback(
+      approve
+          ? 'Request approved. Collection details are ready.'
+          : 'Request rejected and the member status was updated.',
+    );
+  }
+
+  void _confirmCollection() {
+    if (_appState.confirmCollection()) {
+      _showFeedback('Collection confirmed and the tool is now on loan.');
+    } else {
+      _showFeedback('Collection cannot be confirmed in the current state.');
+    }
+  }
+
+  Future<void> _submitReturn() async {
+    final record = _appState.selectedBorrowedRecord;
+    final condition = _appState.selectedReturnCondition;
+    if (record == null || condition == null) {
+      _showFeedback('Select the returned tool condition before continuing.');
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.assignment_turned_in_outlined),
+        title: const Text('Submit return record?'),
+        content: Text(
+          'Record ${record.tool.name} as returned in '
+          '${returnConditionLabel(condition).toLowerCase()} condition?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Submit return'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    if (_appState.completeReturn()) {
+      _showFeedback(
+        condition == ReturnCondition.good
+            ? 'Return recorded. The tool is available again.'
+            : 'Return recorded. The tool is unavailable pending inspection.',
+      );
+    }
+  }
+
+  void _showPrivacyAndEthics() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Privacy and ethical design',
+                  style: Theme.of(sheetContext).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 16),
+                const DesignCommitment(
+                  icon: Icons.data_saver_on_outlined,
+                  title: 'Data minimisation',
+                  description:
+                      'The functional application displays only the member and borrowing information needed for each task.',
+                ),
+                const DesignCommitment(
+                  icon: Icons.admin_panel_settings_outlined,
+                  title: 'Role separation',
+                  description:
+                      'Coordinator functions are separated for assessment. A production deployment would require authenticated role-based access.',
+                ),
+                const DesignCommitment(
+                  icon: Icons.visibility_outlined,
+                  title: 'Transparency and autonomy',
+                  description:
+                      'Requests show their status and consequential actions require confirmation.',
+                ),
+                const DesignCommitment(
+                  icon: Icons.health_and_safety_outlined,
+                  title: 'Safety and fairness',
+                  description:
+                      'Damaged tools remain unavailable, labels avoid hidden conditions and accessible alternatives are provided for gestures.',
+                ),
+                const DesignCommitment(
+                  icon: Icons.storage_outlined,
+                  title: 'Simulated backend and restoration',
+                  description:
+                      'Seed data is separated from user-driven outcomes, while Flutter state restoration preserves the assessment workflow without external packages.',
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _transitionedBody() {
+    // A deliberately visible 700 ms transition lets the marker observe route
+    // continuity while remaining predictable and non-distracting for users.
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 700),
+      reverseDuration: const Duration(milliseconds: 700),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, animation) {
+        final offset = Tween<Offset>(
+          begin: const Offset(0.025, 0),
+          end: Offset.zero,
+        ).animate(animation);
+        return FadeTransition(
+          opacity: animation,
+          child: SlideTransition(position: offset, child: child),
+        );
+      },
+      child: KeyedSubtree(
+        key: ValueKey(_appState.currentRoute),
+        child: _buildCurrentScreen(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final useNavigationRail = constraints.maxWidth >= 760;
+        final extendNavigationRail = constraints.maxWidth >= 1120;
+        final screenBody = _transitionedBody();
+
+        return Scaffold(
+          appBar: AppBar(
+            automaticallyImplyLeading: false,
+            leading: _appState.isTopLevelRoute
+                ? null
+                : Tooltip(
+                    message: 'Back',
+                    child: BackButton(onPressed: _appState.goBack),
+                  ),
+            title: Text(
+              _appState.screenTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            actions: [
+              IconButton(
+                tooltip: 'Privacy and ethical design',
+                onPressed: _showPrivacyAndEthics,
+                icon: const Icon(Icons.privacy_tip_outlined),
+              ),
+              PopupMenuButton<AppRoute>(
+                tooltip: 'Open application screen',
+                icon: const Icon(Icons.apps),
+                onSelected: _appState.goTo,
+                itemBuilder: (context) => AppRoute.values
+                    .map(
+                      (screen) => PopupMenuItem(
+                        value: screen,
+                        child: Text(screenMenuLabel(screen)),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ],
+          ),
+          body: useNavigationRail
+              ? Row(
+                  children: [
+                    NavigationRail(
+                      selectedIndex: _appState.selectedDestination,
+                      onDestinationSelected: _appState.selectDestination,
+                      extended: extendNavigationRail,
+                      labelType: extendNavigationRail
+                          ? NavigationRailLabelType.none
+                          : NavigationRailLabelType.all,
+                      leading: Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Icon(
+                          Icons.home_repair_service,
+                          color: Theme.of(context).colorScheme.primary,
+                          size: 32,
+                        ),
+                      ),
+                      destinations: navigationRailDestinations,
+                    ),
+                    const VerticalDivider(width: 1),
+                    Expanded(child: screenBody),
+                  ],
+                )
+              : screenBody,
+          bottomNavigationBar: useNavigationRail
+              ? null
+              : NavigationBar(
+                  selectedIndex: _appState.selectedDestination,
+                  onDestinationSelected: _appState.selectDestination,
+                  destinations: navigationDestinations,
+                ),
+          floatingActionButton: _appState.currentRoute == AppRoute.home
+              ? FloatingActionButton.extended(
+                  tooltip: 'Browse available tools',
+                  onPressed: () => _appState.goTo(AppRoute.toolLibrary),
+                  icon: const Icon(Icons.search),
+                  label: const Text('Browse tools'),
+                )
+              : null,
+        );
+      },
+    );
+  }
+
+  Widget _buildCurrentScreen() {
+    switch (_appState.currentRoute) {
+      case AppRoute.home:
+        return HomeScreen(
+          memberName: _appState.memberName,
+          activeRequest: _appState.activeRequest,
+          activeLoanCount:
+              _appState.borrowedRecords.where((record) => !record.returned).length,
+          onOpenTools: () => _appState.goTo(AppRoute.toolLibrary),
+          onOpenBorrowed: () => _appState.goTo(AppRoute.borrowedTools),
+          onOpenStatus: () => _appState.goTo(AppRoute.requestStatus),
+          onOpenCoordinator: () => _appState.goTo(AppRoute.coordinatorApproval),
+        );
+      case AppRoute.toolLibrary:
+        return ToolLibraryScreen(
+          tools: _appState.tools,
+          onToolSelected: _appState.selectTool,
+        );
+      case AppRoute.toolDetails:
+        return ToolDetailsScreen(
+          tool: _appState.selectedTool,
+          onRequest: _appState.prepareBorrowRequest,
+          onBrowseTools: () => _appState.goTo(AppRoute.toolLibrary),
+        );
+      case AppRoute.borrowRequest:
+        return BorrowRequestScreen(
+          memberName: _appState.memberName,
+          tool: _appState.selectedTool,
+          selectedDate: _appState.selectedReturnDate,
+          errorText: _appState.returnDateError,
+          onChooseDate: _chooseReturnDate,
+          onSubmit: _submitBorrowRequest,
+        );
+      case AppRoute.requestStatus:
+        return RequestStatusScreen(
+          request: _appState.activeRequest,
+          onBrowseTools: () => _appState.goTo(AppRoute.toolLibrary),
+          onCoordinatorReview: () => _appState.goTo(AppRoute.coordinatorApproval),
+        );
+      case AppRoute.coordinatorApproval:
+        return CoordinatorApprovalScreen(
+          request: _appState.activeRequest,
+          onApprove: () => _confirmRequestDecision(true),
+          onReject: () => _confirmRequestDecision(false),
+          onCreateRequest: () => _appState.goTo(AppRoute.toolLibrary),
+          onOpenCollection: () => _appState.goTo(AppRoute.approvedCollection),
+          onOpenStatus: () => _appState.goTo(AppRoute.requestStatus),
+        );
+      case AppRoute.approvedCollection:
+        return ApprovedCollectionScreen(
+          request: _appState.activeRequest,
+          onConfirmCollection: _confirmCollection,
+          onCoordinatorReview: () => _appState.goTo(AppRoute.coordinatorApproval),
+        );
+      case AppRoute.borrowedTools:
+        return BorrowedToolsScreen(
+          records: _appState.borrowedRecords
+              .where((record) => !record.returned)
+              .toList(growable: false),
+          onReturnTool: (record) {
+            _appState.startReturn(record);
+            _showFeedback('Return workflow opened for ${record.tool.name}.');
+          },
+          onBrowseTools: () => _appState.goTo(AppRoute.toolLibrary),
+        );
+      case AppRoute.returnTool:
+        return ReturnToolScreen(
+          record: _appState.selectedBorrowedRecord,
+          selectedCondition: _appState.selectedReturnCondition,
+          notes: _appState.returnNotes,
+          onConditionChanged: _appState.setReturnCondition,
+          onNotesChanged: _appState.setReturnNotes,
+          onSubmit: _submitReturn,
+          onOpenBorrowed: () => _appState.goTo(AppRoute.borrowedTools),
+        );
+      case AppRoute.returnRecord:
+        return ReturnRecordScreen(
+          record: _appState.lastReturnedRecord,
+          onOpenBorrowed: () => _appState.goTo(AppRoute.borrowedTools),
+          onBrowseTools: () => _appState.goTo(AppRoute.toolLibrary),
+        );
+    }
+  }
+}
+
+const List<NavigationDestination> navigationDestinations = [
+  NavigationDestination(
+    icon: Icon(Icons.home_outlined),
+    selectedIcon: Icon(Icons.home),
+    label: 'Home',
+  ),
+  NavigationDestination(
+    icon: Icon(Icons.search_outlined),
+    selectedIcon: Icon(Icons.search),
+    label: 'Tools',
+  ),
+  NavigationDestination(
+    icon: Icon(Icons.inventory_2_outlined),
+    selectedIcon: Icon(Icons.inventory_2),
+    label: 'Borrowed',
+  ),
+  NavigationDestination(
+    icon: Icon(Icons.admin_panel_settings_outlined),
+    selectedIcon: Icon(Icons.admin_panel_settings),
+    label: 'Coordinator',
+  ),
+];
+
+const List<NavigationRailDestination> navigationRailDestinations = [
+  NavigationRailDestination(
+    icon: Icon(Icons.home_outlined),
+    selectedIcon: Icon(Icons.home),
+    label: Text('Home'),
+  ),
+  NavigationRailDestination(
+    icon: Icon(Icons.search_outlined),
+    selectedIcon: Icon(Icons.search),
+    label: Text('Tools'),
+  ),
+  NavigationRailDestination(
+    icon: Icon(Icons.inventory_2_outlined),
+    selectedIcon: Icon(Icons.inventory_2),
+    label: Text('Borrowed'),
+  ),
+  NavigationRailDestination(
+    icon: Icon(Icons.admin_panel_settings_outlined),
+    selectedIcon: Icon(Icons.admin_panel_settings),
+    label: Text('Coordinator'),
+  ),
+];
+
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({
+    super.key,
+    required this.memberName,
+    required this.activeRequest,
+    required this.activeLoanCount,
+    required this.onOpenTools,
+    required this.onOpenBorrowed,
+    required this.onOpenStatus,
+    required this.onOpenCoordinator,
+  });
+
+  final String memberName;
+  final BorrowRequestRecord? activeRequest;
+  final int activeLoanCount;
+  final VoidCallback onOpenTools;
+  final VoidCallback onOpenBorrowed;
+  final VoidCallback onOpenStatus;
+  final VoidCallback onOpenCoordinator;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return ScrollableResponsivePage(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: colorScheme.primaryContainer,
+              borderRadius: BorderRadius.circular(28),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Welcome, $memberName',
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                        color: colorScheme.onPrimaryContainer,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Find a workshop tool, check its availability and follow '
+                  'your borrowing request from approval to return.',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: colorScheme.onPrimaryContainer,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          const SectionHeading(
+            title: 'Quick actions',
+            subtitle: 'Designed for efficient, predictable task completion.',
+          ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final actions = [
+                ActionCard(
+                  icon: Icons.search,
+                  title: 'Search tools',
+                  description: 'Check availability before visiting HMS.',
+                  onTap: onOpenTools,
+                ),
+                ActionCard(
+                  icon: Icons.inventory_2_outlined,
+                  title: 'My borrowed tools',
+                  description: '$activeLoanCount current loan(s) and due dates.',
+                  onTap: onOpenBorrowed,
+                ),
+                ActionCard(
+                  icon: Icons.fact_check_outlined,
+                  title: activeRequest == null
+                      ? 'Request status'
+                      : requestStatusLabel(activeRequest!.status),
+                  description: activeRequest == null
+                      ? 'No active borrowing request.'
+                      : '${activeRequest!.tool.name} - '
+                          '${formatDate(activeRequest!.dueOn)}',
+                  onTap: onOpenStatus,
+                ),
+              ];
+
+              // Compact screens use natural-height cards instead of a fixed
+              // grid aspect ratio. This prevents RenderFlex overflow when text
+              // wraps on narrow DartPad/mobile previews.
+              if (constraints.maxWidth < 560) {
+                return Column(
+                  children: [
+                    for (var index = 0; index < actions.length; index++) ...[
+                      actions[index],
+                      if (index != actions.length - 1)
+                        const SizedBox(height: 12),
+                    ],
+                  ],
+                );
+              }
+
+              final columnCount = constraints.maxWidth >= 900 ? 3 : 2;
+              return GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: columnCount,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: columnCount == 3 ? 1.35 : 1.25,
+                children: actions,
+              );
+            },
+          ),
+          const SizedBox(height: 28),
+          const SectionHeading(
+            title: 'Safety and announcements',
+            subtitle:
+                'Relevant information is visible without requiring James to remember where it is stored.',
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 190,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final itemExtent = math.min(380.0, constraints.maxWidth * 0.84);
+                return CarouselView(
+                  itemExtent: itemExtent,
+                  shrinkExtent: math.min(140.0, itemExtent),
+                  itemSnapping: true,
+                  children: const [
+                    AnnouncementCard(
+                      icon: Icons.health_and_safety_outlined,
+                      title: 'Safety comes first',
+                      description:
+                          'Review the safety guidance shown before collecting any workshop tool.',
+                    ),
+                    AnnouncementCard(
+                      icon: Icons.video_library_outlined,
+                      title: 'Workshop safety resources',
+                      description:
+                          'HMS publishes learning material for saws, drills and other workshop activities.',
+                    ),
+                    AnnouncementCard(
+                      icon: Icons.event_available_outlined,
+                      title: 'Return-date reminder',
+                      description:
+                          'Open My Borrowed Tools to review current loans and due dates.',
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 28),
+          const SectionHeading(
+            title: 'Assignment 1 continuity',
+            subtitle:
+                'The functional second iteration implements the actors, activities and usability goals established in the design.',
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: const [
+              Chip(
+                avatar: Icon(Icons.person_outline),
+                label: Text('HMS Member'),
+              ),
+              Chip(
+                avatar: Icon(Icons.carpenter),
+                label: Text('Carpenter'),
+              ),
+              Chip(
+                avatar: Icon(Icons.engineering_outlined),
+                label: Text('Workshop Manager'),
+              ),
+              Chip(
+                avatar: Icon(Icons.admin_panel_settings_outlined),
+                label: Text('Coordinator'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: const [
+              Chip(label: Text('1. Search')),
+              Chip(label: Text('2. Request')),
+              Chip(label: Text('3. Approve')),
+              Chip(label: Text('4. Borrow')),
+              Chip(label: Text('5. Return')),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.admin_panel_settings_outlined,
+                    color: colorScheme.primary,
+                    size: 30,
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Coordinator demonstration',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'The assessment build exposes the coordinator workflow for demonstration. '
+                          'A production application would require authentication and role-based access.',
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: onOpenCoordinator,
+                          icon: const Icon(Icons.arrow_forward),
+                          label: const Text('Open coordinator view'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 88),
+        ],
+      ),
+    );
+  }
+}
+
+class ToolLibraryScreen extends StatefulWidget {
+  const ToolLibraryScreen({
+    super.key,
+    required this.tools,
+    required this.onToolSelected,
+  });
+
+  final List<ToolItem> tools;
+  final ValueChanged<ToolItem> onToolSelected;
+
+  @override
+  State<ToolLibraryScreen> createState() => _ToolLibraryScreenState();
+}
+
+class _ToolLibraryScreenState extends State<ToolLibraryScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchText = '';
+  String? _selectedCategory;
+
+  static const categories = [
+    'Woodworking',
+    'Carpentry',
+    'Metalworking',
+    'Mechanical',
+    'Power Tools',
+    'Hand Tools',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<ToolItem> _filteredTools(int tabIndex) {
+    return widget.tools.where((tool) {
+      final matchesSearch = tool.name.toLowerCase().contains(
+                _searchText.toLowerCase(),
+              ) ||
+          tool.category.toLowerCase().contains(_searchText.toLowerCase());
+      final matchesCategory =
+          _selectedCategory == null || tool.category == _selectedCategory;
+      final matchesTab = switch (tabIndex) {
+        1 => tool.availability == ToolAvailability.available,
+        2 => tool.availability == ToolAvailability.onLoan,
+        _ => true,
+      };
+      return matchesSearch && matchesCategory && matchesTab;
+    }).toList(growable: false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FillResponsivePage(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _searchController,
+            onChanged: (value) {
+              setState(() {
+                _searchText = value.trim();
+              });
+            },
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              labelText: 'Search HMS tools',
+              hintText: 'Try saw, drill or woodworking',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _searchText.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Clear search',
+                      onPressed: () {
+                        _searchController.clear();
+                        setState(() {
+                          _searchText = '';
+                        });
+                      },
+                      icon: const Icon(Icons.clear),
+                    ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: categories.map((category) {
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FilterChip(
+                    label: Text(category),
+                    selected: _selectedCategory == category,
+                    onSelected: (selected) {
+                      setState(() {
+                        _selectedCategory = selected ? category : null;
+                      });
+                    },
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TabBar(
+            controller: _tabController,
+            tabs: const [
+              Tab(text: 'All'),
+              Tab(text: 'Available'),
+              Tab(text: 'On loan'),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: List.generate(3, (tabIndex) {
+                return ToolResultsView(
+                  tools: _filteredTools(tabIndex),
+                  onToolSelected: widget.onToolSelected,
+                );
+              }),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ToolResultsView extends StatelessWidget {
+  const ToolResultsView({
+    super.key,
+    required this.tools,
+    required this.onToolSelected,
+  });
+
+  final List<ToolItem> tools;
+  final ValueChanged<ToolItem> onToolSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    if (tools.isEmpty) {
+      return const EmptyState(
+        icon: Icons.search_off,
+        title: 'No matching tools',
+        description: 'Change the search text, category or availability tab.',
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final useGrid = constraints.maxWidth >= 760;
+
+        if (useGrid) {
+          final columnCount = constraints.maxWidth >= 1040 ? 3 : 2;
+          return GridView.builder(
+            padding: const EdgeInsets.only(top: 4, bottom: 24),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columnCount,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              childAspectRatio: 1.42,
+            ),
+            itemCount: tools.length,
+            itemBuilder: (context, index) {
+              return ToolSummaryCard(
+                tool: tools[index],
+                onTap: () => onToolSelected(tools[index]),
+              );
+            },
+          );
+        }
+
+        return ListView.separated(
+          padding: const EdgeInsets.only(top: 4, bottom: 24),
+          itemCount: tools.length,
+          separatorBuilder: (context, index) => const SizedBox(height: 10),
+          itemBuilder: (context, index) {
+            return ToolSummaryCard(
+              tool: tools[index],
+              onTap: () => onToolSelected(tools[index]),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class ToolDetailsScreen extends StatelessWidget {
+  const ToolDetailsScreen({
+    super.key,
+    required this.tool,
+    required this.onRequest,
+    required this.onBrowseTools,
+  });
+
+  final ToolItem? tool;
+  final VoidCallback onRequest;
+  final VoidCallback onBrowseTools;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedTool = tool;
+    if (selectedTool == null) {
+      return EmptyState(
+        icon: Icons.handyman_outlined,
+        title: 'Select a tool',
+        description: 'Open the Tool Library and choose a tool to view details.',
+        actionLabel: 'Browse tools',
+        onAction: onBrowseTools,
+      );
+    }
+
+    return ScrollableResponsivePage(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 760;
+          final imagePanel = ToolImagePanel(tool: selectedTool);
+          final detailsPanel = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                selectedTool.name,
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  Chip(label: Text(selectedTool.category)),
+                  AvailabilityChip(availability: selectedTool.availability),
+                ],
+              ),
+              const SizedBox(height: 18),
+              Text(
+                selectedTool.description,
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+              const SizedBox(height: 20),
+              InfoRow(
+                icon: Icons.health_and_safety_outlined,
+                label: 'Recorded condition',
+                value: selectedTool.condition,
+              ),
+              const SizedBox(height: 12),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Safety information',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(selectedTool.safetyInformation),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed:
+                    selectedTool.availability == ToolAvailability.available
+                        ? onRequest
+                        : null,
+                icon: const Icon(Icons.assignment_add),
+                label: const Text('Request to borrow'),
+              ),
+              if (selectedTool.availability != ToolAvailability.available) ...[
+                const SizedBox(height: 10),
+                Text(
+                  'Borrowing is unavailable while this tool is on loan or under maintenance.',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ],
+          );
+
+          if (isWide) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(width: 320, child: imagePanel),
+                const SizedBox(width: 32),
+                Expanded(child: detailsPanel),
+              ],
+            );
+          }
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              imagePanel,
+              const SizedBox(height: 24),
+              detailsPanel,
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class BorrowRequestScreen extends StatelessWidget {
+  const BorrowRequestScreen({
+    super.key,
+    required this.memberName,
+    required this.tool,
+    required this.selectedDate,
+    required this.errorText,
+    required this.onChooseDate,
+    required this.onSubmit,
+  });
+
+  final String memberName;
+  final ToolItem? tool;
+  final DateTime? selectedDate;
+  final String? errorText;
+  final VoidCallback onChooseDate;
+  final VoidCallback onSubmit;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedTool = tool;
+    if (selectedTool == null) {
+      return const EmptyState(
+        icon: Icons.assignment_add,
+        title: 'No tool selected',
+        description: 'Select an available tool before creating a request.',
+      );
+    }
+
+    return ScrollableResponsivePage(
+      maxWidth: 760,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionHeading(
+            title: 'Review borrowing details',
+            subtitle:
+                'Choose a return date before sending the request to the coordinator.',
+          ),
+          const SizedBox(height: 20),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  InfoRow(
+                    icon: selectedTool.icon,
+                    label: 'Selected tool',
+                    value: selectedTool.name,
+                  ),
+                  const Divider(height: 28),
+                  InfoRow(
+                    icon: Icons.person_outline,
+                    label: 'Member',
+                    value: memberName,
+                  ),
+                  const Divider(height: 28),
+                  InfoRow(
+                    icon: Icons.event_outlined,
+                    label: 'Expected return',
+                    value: selectedDate == null
+                        ? 'Not selected'
+                        : formatDate(selectedDate!),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: onChooseDate,
+            icon: const Icon(Icons.calendar_month_outlined),
+            label: Text(
+              selectedDate == null ? 'Choose return date' : 'Change return date',
+            ),
+          ),
+          if (errorText != null) ...[
+            const SizedBox(height: 10),
+            Semantics(
+              liveRegion: true,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      errorText!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            onPressed: onSubmit,
+            icon: const Icon(Icons.send_outlined),
+            label: const Text('Submit request'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class RequestStatusScreen extends StatelessWidget {
+  const RequestStatusScreen({
+    super.key,
+    required this.request,
+    required this.onBrowseTools,
+    required this.onCoordinatorReview,
+  });
+
+  final BorrowRequestRecord? request;
+  final VoidCallback onBrowseTools;
+  final VoidCallback onCoordinatorReview;
+
+  @override
+  Widget build(BuildContext context) {
+    final currentRequest = request;
+    if (currentRequest == null) {
+      return EmptyState(
+        icon: Icons.hourglass_empty,
+        title: 'No request submitted',
+        description:
+            'Choose an available tool and submit a borrowing request first.',
+        actionLabel: 'Browse tools',
+        onAction: onBrowseTools,
+      );
+    }
+
+    return ScrollableResponsivePage(
+      maxWidth: 760,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          RequestStatusPanel(status: currentRequest.status),
+          const SizedBox(height: 20),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  InfoRow(
+                    icon: currentRequest.tool.icon,
+                    label: 'Tool',
+                    value: currentRequest.tool.name,
+                  ),
+                  const Divider(height: 28),
+                  InfoRow(
+                    icon: Icons.today_outlined,
+                    label: 'Requested',
+                    value: formatDate(currentRequest.requestedOn),
+                  ),
+                  const Divider(height: 28),
+                  InfoRow(
+                    icon: Icons.event_available_outlined,
+                    label: 'Expected return',
+                    value: formatDate(currentRequest.dueOn),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          if (currentRequest.status == BorrowRequestStatus.pending)
+            OutlinedButton.icon(
+              onPressed: onCoordinatorReview,
+              icon: const Icon(Icons.admin_panel_settings_outlined),
+              label: const Text('Open coordinator demonstration'),
+            ),
+          if (currentRequest.status == BorrowRequestStatus.rejected)
+            FilledButton.icon(
+              onPressed: onBrowseTools,
+              icon: const Icon(Icons.search),
+              label: const Text('Choose another tool'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class CoordinatorApprovalScreen extends StatelessWidget {
+  const CoordinatorApprovalScreen({
+    super.key,
+    required this.request,
+    required this.onApprove,
+    required this.onReject,
+    required this.onCreateRequest,
+    required this.onOpenCollection,
+    required this.onOpenStatus,
+  });
+
+  final BorrowRequestRecord? request;
+  final VoidCallback onApprove;
+  final VoidCallback onReject;
+  final VoidCallback onCreateRequest;
+  final VoidCallback onOpenCollection;
+  final VoidCallback onOpenStatus;
+
+  @override
+  Widget build(BuildContext context) {
+    final currentRequest = request;
+    if (currentRequest == null) {
+      return EmptyState(
+        icon: Icons.inbox_outlined,
+        title: 'No pending requests',
+        description:
+            'Complete the member Borrow Request screen to create a request for review.',
+        actionLabel: 'Open borrow request',
+        onAction: onCreateRequest,
+      );
+    }
+
+    return ScrollableResponsivePage(
+      maxWidth: 900,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(22),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Borrowing request',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                      ),
+                      RequestStatusChip(status: currentRequest.status),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  InfoRow(
+                    icon: Icons.person_outline,
+                    label: 'Member',
+                    value: currentRequest.memberName,
+                  ),
+                  const Divider(height: 28),
+                  InfoRow(
+                    icon: currentRequest.tool.icon,
+                    label: 'Tool',
+                    value: currentRequest.tool.name,
+                  ),
+                  const Divider(height: 28),
+                  InfoRow(
+                    icon: Icons.event_outlined,
+                    label: 'Return date',
+                    value: formatDate(currentRequest.dueOn),
+                  ),
+                  const Divider(height: 28),
+                  InfoRow(
+                    icon: Icons.inventory_2_outlined,
+                    label: 'Current availability',
+                    value: availabilityLabel(currentRequest.tool.availability),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          if (currentRequest.status == BorrowRequestStatus.pending)
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                FilledButton.icon(
+                  onPressed: onApprove,
+                  icon: const Icon(Icons.check),
+                  label: const Text('Approve'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: onReject,
+                  icon: const Icon(Icons.close),
+                  label: const Text('Reject'),
+                ),
+              ],
+            ),
+          if (currentRequest.status == BorrowRequestStatus.approved)
+            FilledButton.icon(
+              onPressed: onOpenCollection,
+              icon: const Icon(Icons.inventory),
+              label: const Text('Open collection details'),
+            ),
+          if (currentRequest.status == BorrowRequestStatus.rejected)
+            OutlinedButton.icon(
+              onPressed: onOpenStatus,
+              icon: const Icon(Icons.visibility_outlined),
+              label: const Text('View member status'),
+            ),
+          const SizedBox(height: 24),
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(20),
+              child: DesignCommitment(
+                icon: Icons.lock_person_outlined,
+                title: 'Coordinator access boundary',
+                description:
+                    'This screen is visible for assessment. A production version would require authenticated coordinator access.',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ApprovedCollectionScreen extends StatelessWidget {
+  const ApprovedCollectionScreen({
+    super.key,
+    required this.request,
+    required this.onConfirmCollection,
+    required this.onCoordinatorReview,
+  });
+
+  final BorrowRequestRecord? request;
+  final VoidCallback onConfirmCollection;
+  final VoidCallback onCoordinatorReview;
+
+  @override
+  Widget build(BuildContext context) {
+    final currentRequest = request;
+    if (currentRequest == null ||
+        currentRequest.status != BorrowRequestStatus.approved) {
+      return EmptyState(
+        icon: Icons.inventory_outlined,
+        title: 'No approved collection',
+        description:
+            'A coordinator must approve the request before collection can be confirmed.',
+        actionLabel: 'Open coordinator review',
+        onAction: onCoordinatorReview,
+      );
+    }
+
+    return ScrollableResponsivePage(
+      maxWidth: 820,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.secondaryContainer,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.verified_outlined,
+                  size: 38,
+                  color: Theme.of(context).colorScheme.onSecondaryContainer,
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Request approved',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSecondaryContainer,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${currentRequest.memberName} may collect '
+                        '${currentRequest.tool.name}.',
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  InfoRow(
+                    icon: Icons.location_on_outlined,
+                    label: 'Collection point',
+                    value: 'HMS workshop tool counter',
+                  ),
+                  const Divider(height: 28),
+                  InfoRow(
+                    icon: Icons.event_available_outlined,
+                    label: 'Return by',
+                    value: formatDate(currentRequest.dueOn),
+                  ),
+                  const Divider(height: 28),
+                  InfoRow(
+                    icon: Icons.health_and_safety_outlined,
+                    label: 'Safety reminder',
+                    value: currentRequest.tool.safetyInformation,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            onPressed: onConfirmCollection,
+            icon: const Icon(Icons.inventory),
+            label: const Text('Confirm collection'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class BorrowedToolsScreen extends StatelessWidget {
+  const BorrowedToolsScreen({
+    super.key,
+    required this.records,
+    required this.onReturnTool,
+    required this.onBrowseTools,
+  });
+
+  final List<BorrowedToolRecord> records;
+  final ValueChanged<BorrowedToolRecord> onReturnTool;
+  final VoidCallback onBrowseTools;
+
+  Widget _swipeToReturn(BuildContext context, BorrowedToolRecord record) {
+    return Dismissible(
+      key: ValueKey('borrowed-${record.tool.name}-${record.borrowedOn.toIso8601String()}'),
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (_) async {
+        onReturnTool(record);
+        return false; // Swipe is a shortcut into the workflow, not a destructive delete.
+      },
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.secondaryContainer,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Icon(
+              Icons.assignment_return_outlined,
+              color: Theme.of(context).colorScheme.onSecondaryContainer,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Return tool',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSecondaryContainer,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+      child: BorrowedToolCard(
+        record: record,
+        onReturn: () => onReturnTool(record),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (records.isEmpty) {
+      return EmptyState(
+        icon: Icons.inventory_2_outlined,
+        title: 'No borrowed tools',
+        description: 'Approved and collected tools will appear here.',
+        actionLabel: 'Browse tools',
+        onAction: onBrowseTools,
+      );
+    }
+
+    return ScrollableResponsivePage(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionHeading(
+            title: 'Current loans',
+            subtitle:
+                'Tap Return tool or swipe a loan from right to left. The visible button remains an accessible alternative.',
+          ),
+          const SizedBox(height: 16),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final useGrid = constraints.maxWidth >= 760;
+              if (useGrid) {
+                return GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    childAspectRatio: 1.5,
+                  ),
+                  itemCount: records.length,
+                  itemBuilder: (context, index) =>
+                      _swipeToReturn(context, records[index]),
+                );
+              }
+
+              return ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: records.length,
+                separatorBuilder: (context, index) => const SizedBox(height: 12),
+                itemBuilder: (context, index) =>
+                    _swipeToReturn(context, records[index]),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ReturnToolScreen extends StatelessWidget {
+  const ReturnToolScreen({
+    super.key,
+    required this.record,
+    required this.selectedCondition,
+    required this.notes,
+    required this.onConditionChanged,
+    required this.onNotesChanged,
+    required this.onSubmit,
+    required this.onOpenBorrowed,
+  });
+
+  final BorrowedToolRecord? record;
+  final ReturnCondition? selectedCondition;
+  final String notes;
+  final ValueChanged<ReturnCondition> onConditionChanged;
+  final ValueChanged<String> onNotesChanged;
+  final VoidCallback onSubmit;
+  final VoidCallback onOpenBorrowed;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedRecord = record;
+    if (selectedRecord == null || selectedRecord.returned) {
+      return EmptyState(
+        icon: Icons.assignment_return_outlined,
+        title: 'Select a borrowed tool',
+        description: 'Open My Borrowed Tools and select Return Tool.',
+        actionLabel: 'Open borrowed tools',
+        onAction: onOpenBorrowed,
+      );
+    }
+
+    return ScrollableResponsivePage(
+      maxWidth: 820,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Card(
+            child: ListTile(
+              minVerticalPadding: 18,
+              leading: Icon(selectedRecord.tool.icon, size: 34),
+              title: Text(selectedRecord.tool.name),
+              subtitle: Text(
+                'Borrowed ${formatDate(selectedRecord.borrowedOn)} - '
+                'due ${formatDate(selectedRecord.dueOn)}',
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          const SectionHeading(
+            title: 'Returned condition',
+            subtitle:
+                'Select the option that most accurately describes the tool.',
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: ReturnCondition.values.map((condition) {
+              return ChoiceChip(
+                avatar: Icon(returnConditionIcon(condition)),
+                label: Text(returnConditionLabel(condition)),
+                selected: selectedCondition == condition,
+                onSelected: (selected) {
+                  if (selected) {
+                    onConditionChanged(condition);
+                  }
+                },
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 20),
+          TextFormField(
+            key: ValueKey(selectedRecord.tool.name),
+            initialValue: notes,
+            onChanged: onNotesChanged,
+            minLines: 3,
+            maxLines: 5,
+            decoration: const InputDecoration(
+              labelText: 'Condition notes',
+              hintText: 'Describe any wear, damage or maintenance concern',
+              alignLabelWithHint: true,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Tools with damage or maintenance concerns remain unavailable until inspected. This prevents an unsafe automatic return to inventory.',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            onPressed: onSubmit,
+            icon: const Icon(Icons.assignment_turned_in_outlined),
+            label: const Text('Submit return'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ReturnRecordScreen extends StatelessWidget {
+  const ReturnRecordScreen({
+    super.key,
+    required this.record,
+    required this.onOpenBorrowed,
+    required this.onBrowseTools,
+  });
+
+  final BorrowedToolRecord? record;
+  final VoidCallback onOpenBorrowed;
+  final VoidCallback onBrowseTools;
+
+  @override
+  Widget build(BuildContext context) {
+    final returnedRecord = record;
+    if (returnedRecord == null || returnedRecord.returnedOn == null) {
+      return EmptyState(
+        icon: Icons.receipt_long_outlined,
+        title: 'No return recorded',
+        description:
+            'Complete the Return Tool screen to create a coordinator return record.',
+        actionLabel: 'Open borrowed tools',
+        onAction: onOpenBorrowed,
+      );
+    }
+
+    final isAvailable =
+        returnedRecord.tool.availability == ToolAvailability.available;
+
+    return ScrollableResponsivePage(
+      maxWidth: 820,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(22),
+            decoration: BoxDecoration(
+              color: isAvailable
+                  ? Theme.of(context).colorScheme.secondaryContainer
+                  : Theme.of(context).colorScheme.errorContainer,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isAvailable
+                      ? Icons.check_circle_outline
+                      : Icons.build_circle_outlined,
+                  size: 40,
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Return recorded',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        isAvailable
+                            ? 'The tool is available for future requests.'
+                            : 'The tool is unavailable until inspection or maintenance is complete.',
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  InfoRow(
+                    icon: returnedRecord.tool.icon,
+                    label: 'Returned tool',
+                    value: returnedRecord.tool.name,
+                  ),
+                  const Divider(height: 28),
+                  InfoRow(
+                    icon: Icons.person_outline,
+                    label: 'Member',
+                    value: returnedRecord.memberName,
+                  ),
+                  const Divider(height: 28),
+                  InfoRow(
+                    icon: Icons.today_outlined,
+                    label: 'Returned on',
+                    value: formatDate(returnedRecord.returnedOn!),
+                  ),
+                  const Divider(height: 28),
+                  InfoRow(
+                    icon: returnConditionIcon(
+                      returnedRecord.returnedCondition!,
+                    ),
+                    label: 'Recorded condition',
+                    value: returnConditionLabel(
+                      returnedRecord.returnedCondition!,
+                    ),
+                  ),
+                  const Divider(height: 28),
+                  InfoRow(
+                    icon: Icons.inventory_2_outlined,
+                    label: 'Updated availability',
+                    value: availabilityLabel(
+                      returnedRecord.tool.availability,
+                    ),
+                  ),
+                  if (returnedRecord.returnNotes.isNotEmpty) ...[
+                    const Divider(height: 28),
+                    InfoRow(
+                      icon: Icons.notes_outlined,
+                      label: 'Notes',
+                      value: returnedRecord.returnNotes,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              FilledButton.icon(
+                onPressed: onBrowseTools,
+                icon: const Icon(Icons.search),
+                label: const Text('Browse tools'),
+              ),
+              OutlinedButton.icon(
+                onPressed: onOpenBorrowed,
+                icon: const Icon(Icons.inventory_2_outlined),
+                label: const Text('My borrowed tools'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ScrollableResponsivePage extends StatelessWidget {
+  const ScrollableResponsivePage({
+    super.key,
+    required this.child,
+    this.maxWidth = 1180,
+  });
+
+  final Widget child;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final horizontalPadding = constraints.maxWidth >= 1000
+            ? 32.0
+            : constraints.maxWidth >= 600
+                ? 24.0
+                : 16.0;
+
+        return SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+            horizontalPadding,
+            20,
+            horizontalPadding,
+            28,
+          ),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxWidth),
+              child: child,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class FillResponsivePage extends StatelessWidget {
+  const FillResponsivePage({
+    super.key,
+    required this.child,
+    this.maxWidth = 1180,
+  });
+
+  final Widget child;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final horizontalPadding = constraints.maxWidth >= 1000
+            ? 32.0
+            : constraints.maxWidth >= 600
+                ? 24.0
+                : 16.0;
+        final availableWidth = math.max(
+          0.0,
+          math.min(maxWidth, constraints.maxWidth - horizontalPadding * 2),
+        );
+
+        return Center(
+          child: SizedBox(
+            width: availableWidth,
+            height: constraints.maxHeight,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: child,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class SectionHeading extends StatelessWidget {
+  const SectionHeading({
+    super.key,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 4),
+        Text(subtitle, style: Theme.of(context).textTheme.bodyLarge),
+      ],
+    );
+  }
+}
+
+class ActionCard extends StatelessWidget {
+  const ActionCard({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 30, color: Theme.of(context).colorScheme.primary),
+              const SizedBox(height: 12),
+              Text(title, style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 5),
+              Text(description, maxLines: 3, overflow: TextOverflow.ellipsis),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class AnnouncementCard extends StatelessWidget {
+  const AnnouncementCard({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.description,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      // Keep carousel content within its fixed height on narrow previews.
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 28, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(height: 8),
+          Text(
+            title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 4),
+          Text(description, maxLines: 2, overflow: TextOverflow.ellipsis),
+        ],
+      ),
+    );
+  }
+}
+
+class ToolSummaryCard extends StatelessWidget {
+  const ToolSummaryCard({
+    super.key,
+    required this.tool,
+    required this.onTap,
+  });
+
+  final ToolItem tool;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(
+                  tool.icon,
+                  size: 30,
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      tool.name,
+                      style: Theme.of(context).textTheme.titleMedium,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(tool.category),
+                    const SizedBox(height: 10),
+                    AvailabilityChip(availability: tool.availability),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ToolImagePanel extends StatelessWidget {
+  const ToolImagePanel({super.key, required this.tool});
+
+  final ToolItem tool;
+
+  @override
+  Widget build(BuildContext context) {
+    return AspectRatio(
+      aspectRatio: 1.25,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primaryContainer,
+          borderRadius: BorderRadius.circular(28),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              tool.icon,
+              size: 96,
+              color: Theme.of(context).colorScheme.onPrimaryContainer,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'HMS tool',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class BorrowedToolCard extends StatelessWidget {
+  const BorrowedToolCard({
+    super.key,
+    required this.record,
+    required this.onReturn,
+  });
+
+  final BorrowedToolRecord record;
+  final VoidCallback onReturn;
+
+  @override
+  Widget build(BuildContext context) {
+    final today = DateUtils.dateOnly(DateTime.now());
+    final isOverdue = record.dueOn.isBefore(today);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(record.tool.icon, size: 34),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    record.tool.name,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                const Chip(label: Text('On loan')),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text('Borrowed: ${formatDate(record.borrowedOn)}'),
+            const SizedBox(height: 4),
+            Text(
+              'Return by: ${formatDate(record.dueOn)}',
+              style: TextStyle(
+                color: isOverdue ? Theme.of(context).colorScheme.error : null,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.icon(
+                onPressed: onReturn,
+                icon: const Icon(Icons.assignment_return_outlined),
+                label: const Text('Return tool'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class InfoRow extends StatelessWidget {
+  const InfoRow({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: Theme.of(context).colorScheme.primary),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              const SizedBox(height: 3),
+              Text(value, style: Theme.of(context).textTheme.bodyLarge),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class AvailabilityChip extends StatelessWidget {
+  const AvailabilityChip({super.key, required this.availability});
+
+  final ToolAvailability availability;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final backgroundColor = switch (availability) {
+      ToolAvailability.available => colorScheme.secondaryContainer,
+      ToolAvailability.onLoan => colorScheme.tertiaryContainer,
+      ToolAvailability.maintenance => colorScheme.errorContainer,
+    };
+    final foregroundColor = switch (availability) {
+      ToolAvailability.available => colorScheme.onSecondaryContainer,
+      ToolAvailability.onLoan => colorScheme.onTertiaryContainer,
+      ToolAvailability.maintenance => colorScheme.onErrorContainer,
+    };
+    final icon = switch (availability) {
+      ToolAvailability.available => Icons.check_circle_outline,
+      ToolAvailability.onLoan => Icons.schedule,
+      ToolAvailability.maintenance => Icons.build_circle_outlined,
+    };
+
+    return Chip(
+      avatar: Icon(icon, color: foregroundColor, size: 19),
+      label: Text(availabilityLabel(availability)),
+      backgroundColor: backgroundColor,
+      labelStyle: TextStyle(
+        color: foregroundColor,
+        fontWeight: FontWeight.w600,
+      ),
+      side: BorderSide.none,
+    );
+  }
+}
+
+class RequestStatusChip extends StatelessWidget {
+  const RequestStatusChip({super.key, required this.status});
+
+  final BorrowRequestStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isNegative = status == BorrowRequestStatus.rejected;
+    return Chip(
+      avatar: Icon(requestStatusIcon(status), size: 19),
+      label: Text(requestStatusLabel(status)),
+      backgroundColor:
+          isNegative ? colorScheme.errorContainer : colorScheme.primaryContainer,
+      side: BorderSide.none,
+    );
+  }
+}
+
+class RequestStatusPanel extends StatelessWidget {
+  const RequestStatusPanel({super.key, required this.status});
+
+  final BorrowRequestStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isRejected = status == BorrowRequestStatus.rejected;
+    final backgroundColor =
+        isRejected ? colorScheme.errorContainer : colorScheme.primaryContainer;
+    final foregroundColor = isRejected
+        ? colorScheme.onErrorContainer
+        : colorScheme.onPrimaryContainer;
+
+    return Semantics(
+      liveRegion: true,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              requestStatusIcon(status),
+              size: 38,
+              color: foregroundColor,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    requestStatusLabel(status),
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: foregroundColor,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    requestStatusMessage(status),
+                    style: TextStyle(color: foregroundColor),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class DesignCommitment extends StatelessWidget {
+  const DesignCommitment({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.description,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Text(description),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class EmptyState extends StatelessWidget {
+  const EmptyState({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.description,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 64,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                style: Theme.of(context).textTheme.titleLarge,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                description,
+                style: Theme.of(context).textTheme.bodyLarge,
+                textAlign: TextAlign.center,
+              ),
+              if (actionLabel != null && onAction != null) ...[
+                const SizedBox(height: 20),
+                FilledButton(onPressed: onAction, child: Text(actionLabel!)),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String screenMenuLabel(AppRoute screen) {
+  switch (screen) {
+    case AppRoute.home:
+      return '1. Home / Dashboard';
+    case AppRoute.toolLibrary:
+      return '2. Tool Library / Search';
+    case AppRoute.toolDetails:
+      return '3. Tool Details';
+    case AppRoute.borrowRequest:
+      return '4. Borrow Request';
+    case AppRoute.requestStatus:
+      return '5. Request Status';
+    case AppRoute.coordinatorApproval:
+      return '6. Coordinator Approval';
+    case AppRoute.approvedCollection:
+      return '7. Approved Collection';
+    case AppRoute.borrowedTools:
+      return '8. My Borrowed Tools';
+    case AppRoute.returnTool:
+      return '9. Return Tool';
+    case AppRoute.returnRecord:
+      return '10. Return Record';
+  }
+}
+
+String availabilityLabel(ToolAvailability availability) {
+  switch (availability) {
+    case ToolAvailability.available:
+      return 'Available';
+    case ToolAvailability.onLoan:
+      return 'On loan';
+    case ToolAvailability.maintenance:
+      return 'Inspection / maintenance';
+  }
+}
+
+String requestStatusLabel(BorrowRequestStatus status) {
+  switch (status) {
+    case BorrowRequestStatus.pending:
+      return 'Pending review';
+    case BorrowRequestStatus.approved:
+      return 'Approved';
+    case BorrowRequestStatus.rejected:
+      return 'Rejected';
+    case BorrowRequestStatus.collected:
+      return 'Collected / on loan';
+    case BorrowRequestStatus.returned:
+      return 'Returned';
+  }
+}
+
+String requestStatusMessage(BorrowRequestStatus status) {
+  switch (status) {
+    case BorrowRequestStatus.pending:
+      return 'The coordinator has not yet made a decision.';
+    case BorrowRequestStatus.approved:
+      return 'The request was approved. Review the collection details.';
+    case BorrowRequestStatus.rejected:
+      return 'The request was not approved. Choose another available tool.';
+    case BorrowRequestStatus.collected:
+      return 'The tool was collected and appears in My Borrowed Tools.';
+    case BorrowRequestStatus.returned:
+      return 'The tool was returned and its condition was recorded.';
+  }
+}
+
+IconData requestStatusIcon(BorrowRequestStatus status) {
+  switch (status) {
+    case BorrowRequestStatus.pending:
+      return Icons.hourglass_top;
+    case BorrowRequestStatus.approved:
+      return Icons.task_alt;
+    case BorrowRequestStatus.rejected:
+      return Icons.cancel_outlined;
+    case BorrowRequestStatus.collected:
+      return Icons.inventory;
+    case BorrowRequestStatus.returned:
+      return Icons.assignment_turned_in_outlined;
+  }
+}
+
+String returnConditionLabel(ReturnCondition condition) {
+  switch (condition) {
+    case ReturnCondition.good:
+      return 'Good';
+    case ReturnCondition.minorDamage:
+      return 'Minor damage';
+    case ReturnCondition.damaged:
+      return 'Damaged';
+    case ReturnCondition.requiresMaintenance:
+      return 'Requires maintenance';
+  }
+}
+
+IconData returnConditionIcon(ReturnCondition condition) {
+  switch (condition) {
+    case ReturnCondition.good:
+      return Icons.check_circle_outline;
+    case ReturnCondition.minorDamage:
+      return Icons.warning_amber_rounded;
+    case ReturnCondition.damaged:
+      return Icons.report_problem_outlined;
+    case ReturnCondition.requiresMaintenance:
+      return Icons.build_circle_outlined;
+  }
+}
+
+String formatDate(DateTime date) {
+  const monthNames = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return '${date.day} ${monthNames[date.month - 1]} ${date.year}';
+}
 
